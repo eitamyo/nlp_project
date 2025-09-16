@@ -2,6 +2,7 @@ import os
 import json
 import re
 import csv
+from tqdm import tqdm
 
 # Nikud (vowel marks) Unicode range
 NIKUD_PATTERN = re.compile(
@@ -34,50 +35,45 @@ def split_sentences(text: str):
     """Naive sentence splitter for Hebrew."""
     return re.split(r'[.!?]\s+', text)
 
-def extract_dataset(folder, output_file="dataset.csv", max_files=100):
+def extract_dataset(folder, output_file="dataset.csv"):
     """
     Walk through WikiExtractor JSON files and extract sentences
     that have BOTH nikud and non-nikud words.
     Save to CSV: text, words, nikud_mask
     """
     dataset = []
-    files = 0
-
+    all_files = []
     for root, _, filenames in os.walk(folder):
         for filename in filenames:
-            # if not filename.endswith(".json"):
-            #     continue
-            path = os.path.join(root, filename)
-            with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    # try:
-                    article = json.loads(line)
-                    text = article.get("text", "")
-                    # except json.JSONDecodeError:
-                    #     continue
+            all_files.append(os.path.join(root, filename))
 
-                    # Split into sentences
-                    sentences = split_sentences(text)
-                    for sent in sentences:
-                        words = sent.split()
-                        if not words:
-                            continue
+    print(f"📂 Found {len(all_files)} JSON files to process")
 
-                        nikud_mask = [int(has_nikud(w)) for w in words]
+    for path in tqdm(all_files, desc="Processing files"):
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                # try:
+                article = json.loads(line)
+                text = article.get("text", "")
+                # except json.JSONDecodeError:
+                #     continue
 
-                        # Strict filtering: must contain at least one of each
-                        if 1 in nikud_mask and 0 in nikud_mask:
-                            dataset.append({
-                                "text": sent.strip(),
-                                "words": words,
-                                "nikud_mask": nikud_mask
-                            })
+                # Split into sentences
+                sentences = split_sentences(text)
+                for sent in sentences:
+                    words = sent.split()
+                    if not words:
+                        continue
 
-            files += 1
-            if files >= max_files:
-                break
-        if files >= max_files:
-            break
+                    nikud_mask = [int(has_nikud(w)) for w in words]
+
+                    # Strict filtering: must contain at least one of each
+                    if 1 in nikud_mask and 0 in nikud_mask:
+                        dataset.append({
+                            "text": sent.strip(),
+                            "words": words,
+                            "nikud_mask": nikud_mask
+                        })
 
     # Save as CSV
     with open(output_file, "w", encoding="utf-8", newline="") as f:
@@ -94,4 +90,4 @@ def extract_dataset(folder, output_file="dataset.csv", max_files=100):
 
 if __name__ == "__main__":
     folder = "output"  # output of WikiExtractor
-    extract_dataset(folder, output_file="hebrew_nikud_dataset.csv", max_files=1000)
+    extract_dataset(folder, output_file="hebrew_nikud_dataset.csv")
