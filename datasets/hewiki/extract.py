@@ -3,16 +3,32 @@ import json
 import re
 import csv
 
-# Regex ranges
-HEBREW_LETTER = r'[\u05D0-\u05EA]'
-NIKUD = r'[\u0591-\u05C7]'
-
-word_re = re.compile(rf'{HEBREW_LETTER}+{NIKUD}?{HEBREW_LETTER}*')
-nikud_re = re.compile(NIKUD)
+# Nikud (vowel marks) Unicode range
+NIKUD_PATTERN = re.compile(
+    '['
+    '\u05B0'  # sheva
+    '\u05B1'  # hataf segol
+    '\u05B2'  # hataf patah
+    '\u05B3'  # hataf qamats
+    '\u05B4'  # hiriq
+    '\u05B5'  # tsere
+    '\u05B6'  # segol
+    '\u05B7'  # patah
+    '\u05B8'  # qamats
+    '\u05B9'  # holam
+    '\u05BB'  # qubuts
+    '\u05BC'  # dagesh or mapiq
+    '\u05BD'  # meteg
+    '\u05BF'  # rafe (rare)
+    '\u05C1'  # shin dot
+    '\u05C2'  # sin dot
+    '\u05C7'  # qamats qatan
+    ']'
+)
 
 def has_nikud(word: str) -> bool:
     """Check if a word contains nikud (vowel marks)."""
-    return bool(nikud_re.search(word))
+    return bool(NIKUD_PATTERN.search(word))
 
 def split_sentences(text: str):
     """Naive sentence splitter for Hebrew."""
@@ -20,9 +36,9 @@ def split_sentences(text: str):
 
 def extract_dataset(folder, output_file="dataset.csv", max_files=100):
     """
-    Walk through WikiExtractor JSON files and extract sentences/paragraphs
-    that have both nikud and non-nikud words.
-    Save to CSV: id, text, words, nikud_mask
+    Walk through WikiExtractor JSON files and extract sentences
+    that have BOTH nikud and non-nikud words.
+    Save to CSV: text, words, nikud_mask
     """
     dataset = []
     files = 0
@@ -47,10 +63,9 @@ def extract_dataset(folder, output_file="dataset.csv", max_files=100):
                         if not words:
                             continue
 
-                        # Compute which words have nikud
                         nikud_mask = [int(has_nikud(w)) for w in words]
 
-                        # Keep only if there is a mix (some with, some without)
+                        # Strict filtering: must contain at least one of each
                         if 1 in nikud_mask and 0 in nikud_mask:
                             dataset.append({
                                 "text": sent.strip(),
