@@ -5,20 +5,31 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import random
 import threading
+import json
 
 API_KEY = "c911deded97311d0bbd5b39e6381089636b49bda88b4b37b3911f81e26b4ffe1"
 API_URL = "https://benyehuda.org/api/v1/search"
 OUT_DIR = Path("output/benyehuda_modern_texts")
 OUT_DIR.mkdir(exist_ok=True)
+PROGRESS_FILE = Path("output/progress.json")
 
-session = requests.Session()  # reuse connections
+dl_session = requests.Session()  # reuse connections
 
 # concurrency cap for downloads
 MAX_CONCURRENT_DOWNLOADS = 5
 download_semaphore = threading.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
+def save_progress(search_after):
+    data = {"search_after": search_after}
+    PROGRESS_FILE.write_text(json.dumps(data))
 
-def request_with_retry(method, url, **kwargs):
+def load_progress():
+    if PROGRESS_FILE.exists():
+        data = json.loads(PROGRESS_FILE.read_text())
+        return data.get("search_after")
+    return None
+
+def request_with_retry(session, method, url, **kwargs):
     """Generic HTTP request with retries + exponential backoff."""
     max_retries = kwargs.pop("max_retries", 7)
     backoff_base = kwargs.pop("backoff_base", 3)
@@ -27,17 +38,20 @@ def request_with_retry(method, url, **kwargs):
         try:
             r = session.request(method, url, **kwargs)
             if r.status_code == 429:  # rate-limited
-                retry_after = int(r.headers.get("Retry-After", 2))
+                retry_after = int(r.headers.get("Retry-After", backoff_base ** attempt + random.random()))
+                print(f"Rate limited. Retrying after {retry_after} seconds...")
                 time.sleep(retry_after)
                 continue
             r.raise_for_status()
             return r
         except requests.RequestException as e:
             sleep_time = backoff_base ** attempt + random.random()
-            time.sleep(sleep_time)
             if attempt == max_retries - 1:
                 raise e
-    return None
+            time.sleep(sleep_time)
+            # session.close()  # close bad connection
+            # session = requests.Session()  # start a new one
+    raise Exception("Max retries exceeded")
 
 
 def search_period(period="modern", search_after=None):
@@ -51,7 +65,7 @@ def search_period(period="modern", search_after=None):
     }
     if search_after:
         payload["search_after"] = search_after
-    r = request_with_retry("POST", API_URL, json=payload)
+    r = request_with_retry(requests.Session(), "POST", API_URL, json=payload)
     return r.json()
 
 
@@ -71,7 +85,7 @@ def download_work(work):
         return
 
     with download_semaphore:
-        r = request_with_retry("GET", download_url)
+        r = request_with_retry(dl_session, "GET", download_url)
         if not r:
             return
         text = r.content.decode("utf-8")
@@ -86,15 +100,14 @@ def download_work(work):
 
 
 def main():
-    search_after = None
     total = 0
-
+    search_after = load_progress()
     # Initial request to get total count
     data = search_period(search_after=search_after)
     total_count = data.get("total_count", 0)
 
     with tqdm(total=total_count, desc="Downloading works") as pbar:
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             futures = []
 
             while True:
@@ -114,6 +127,7 @@ def main():
                         pbar.update(1)
 
                 search_after = data.get("next_page_search_after")
+                save_progress(search_after)
                 if not search_after:
                     print("No more pages to fetch.")
                     break

@@ -1,4 +1,4 @@
 *.bz2
 **/output*/
-# *.csv
+*.zip
 **/__pycache__/
