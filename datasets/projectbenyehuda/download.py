@@ -20,8 +20,8 @@ download_semaphore = threading.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
 def request_with_retry(method, url, **kwargs):
     """Generic HTTP request with retries + exponential backoff."""
-    max_retries = kwargs.pop("max_retries", 5)
-    backoff_base = kwargs.pop("backoff_base", 1.5)
+    max_retries = kwargs.pop("max_retries", 7)
+    backoff_base = kwargs.pop("backoff_base", 3)
 
     for attempt in range(max_retries):
         try:
@@ -45,12 +45,14 @@ def search_period(period="modern", search_after=None):
         "key": API_KEY,
         "periods": [period],
         "view": "basic",
+        "sort_by": "publication_date",
+        "sort_dir": "desc",
         "file_format": "txt",
     }
     if search_after:
         payload["search_after"] = search_after
     r = request_with_retry("POST", API_URL, json=payload)
-    return r.json() if r else {}
+    return r.json()
 
 
 def download_work(work):
@@ -113,6 +115,7 @@ def main():
 
                 search_after = data.get("next_page_search_after")
                 if not search_after:
+                    print("No more pages to fetch.")
                     break
                 data = search_period(search_after=search_after)
 
