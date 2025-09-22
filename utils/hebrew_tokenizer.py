@@ -3,6 +3,7 @@ import re
 from transformers import AutoModel, AutoTokenizer
 from math import log2
 import torch
+import ast
 
 # Load tokenizer once
 MODEL_NAME = "dicta-il/dictabert-large-char-menaked"
@@ -145,24 +146,74 @@ def convert_token_to_word_mask(text: str, mask):
     A word is considered to have nikud if any of its tokens have nikud.
     """
     tokens = tokenizer.tokenize(text)
+    # print(tokens)
+    if isinstance(mask, str):
+        mask = ast.literal_eval(mask)
+    # assert len(tokens) == len(mask), f"Token and mask lengths do not match: {len(tokens)} != {len(mask)}"
     word_mask = []
     current_word_has_nikud = False
+    is_in_word = False
 
     for token, m in zip(tokens, mask):
-        if HEBREW_LETTER_PATTERN.match(token):  # part of a word
+        if token == ' ':  # space token
+            if is_in_word:  # end of a word
+                if current_word_has_nikud:
+                    word_mask.append(1)
+                else:
+                    word_mask.append(0)
+                is_in_word = False
+                current_word_has_nikud = False
+        else:  # part of a word
+            is_in_word = True
             if m == 1:
                 current_word_has_nikud = True
-        else:  # new word
-            if current_word_has_nikud:
-                word_mask.append(1)
-            elif len(word_mask) > 0:  # not the first word
-                word_mask.append(0)
-            current_word_has_nikud = (m == 1)
 
     # Append mask for the last word
-    if current_word_has_nikud:
-        word_mask.append(1)
-    elif len(word_mask) > 0:
-        word_mask.append(0)
+    if is_in_word:
+        if current_word_has_nikud:
+            word_mask.append(1)
+        else:
+            word_mask.append(0)
 
     return word_mask
+
+def find_next_space(tokens, index):
+    """Find the next space after the given index in the token list."""
+    for i in range(index, len(tokens)):
+        if tokens[i] == " ":
+            return i
+    return None
+
+def find_previous_space(tokens, index):
+    """Find the previous space before the given index in the token list."""
+    for i in range(index - 1, -1, -1):
+        if tokens[i] == " ":
+            return i
+    return None
+
+# Find rows where the nikud_mask contains only one to three 1s in a row (consecutive)
+def has_1s_run(text, mask, min_run=1, max_run=3):
+    mask_str = ''.join(str(x) for x in mask)
+    tokens = tokenizer.tokenize(text)
+    # Check for runs of 1s of length 1, 2, or 3
+    for run_length in range(max_run, min_run - 1, -1):
+        i = mask_str.find(f"{'1' * run_length}")
+        if i != -1:
+            prev = find_previous_space(tokens, i)
+            prevprev = find_previous_space(tokens, prev) if prev is not None else None
+            prevvalid = True
+            if prevprev is not None:
+                prevvalid = '1' not in mask_str[prevprev+1:prev]
+            elif prev is not None:
+                prevvalid = '1' not in mask_str[0:prev]
+            next = find_next_space(tokens, i + run_length)
+            nextnext = find_next_space(tokens, next + 1) if next is not None else None
+            nextvalid = True
+            if nextnext is not None:
+                nextvalid = '1' not in mask_str[next+1:nextnext]
+            elif next is not None:
+                nextvalid = '1' not in mask_str[next+1:]
+
+            if prevvalid and nextvalid:
+                return True
+    return False
